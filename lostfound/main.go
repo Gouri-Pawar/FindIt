@@ -9,6 +9,7 @@ import (
 )
 
 func main() {
+	//demo 
 	database.Connect()
 
 	r := gin.Default()
