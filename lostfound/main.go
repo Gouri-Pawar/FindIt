@@ -9,9 +9,6 @@ import (
 )
 
 func main() {
-	//demo 1
-	//demo 2
-	// demo 3
 	database.Connect()
 
 	r := gin.Default()
@@ -20,15 +17,20 @@ func main() {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 
-	// Open routes, anyone can use
+	// Open routes: anyone can use
 	r.POST("/register", handlers.Register)
 	r.POST("/login", handlers.Login)
+	r.GET("/items", handlers.ListItems)
+	r.GET("/items/:id", handlers.GetItem)
 
-	// Protected routes, token needed
+	// Protected routes: token needed
 	protected := r.Group("/")
 	protected.Use(auth.RequireAuth())
 	{
 		protected.GET("/me", handlers.Me)
+		protected.POST("/items", handlers.CreateItem)
+		protected.PUT("/items/:id", handlers.UpdateItem)
+		protected.DELETE("/items/:id", handlers.DeleteItem)
 	}
 
 	r.Run(":8080")
