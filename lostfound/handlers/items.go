@@ -1,39 +1,112 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"net/http"
+	"path/filepath"
+	"strconv"
 
 	"lostfound/database"
 	"lostfound/models"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+	"strings"
 )
 
-type itemInput struct {
-	Title       string `json:"title" binding:"required"`
-	Description string `json:"description"`
-	Category    string `json:"category" binding:"required"`
-	Location    string `json:"location" binding:"required"`
-	Type        string `json:"type" binding:"required,oneof=lost found"`
-	ImageURL    string `json:"image_url"`
+// Only these photo types are allowed
+var imageTypes = map[string]string{
+	"image/jpeg": ".jpg",
+	"image/png":  ".png",
+	"image/gif":  ".gif",
+	"image/webp": ".webp",
 }
 
-// Pointers let us know which fields the user really sent
+type itemInput struct {
+	Title       string `form:"title" json:"title" binding:"required"`
+	Description string `form:"description" json:"description"`
+	Category    string `form:"category" json:"category" binding:"required"`
+	Location    string `form:"location" json:"location" binding:"required"`
+	KeptAt      string `form:"kept_at" json:"kept_at"`
+	Contact     string `form:"contact" json:"contact"`
+	Type        string `form:"type" json:"type" binding:"required,oneof=lost found"`
+}
+
 type updateInput struct {
 	Title       *string `json:"title"`
 	Description *string `json:"description"`
 	Category    *string `json:"category"`
 	Location    *string `json:"location"`
+	KeptAt      *string `json:"kept_at"`
+	Contact     *string `json:"contact"`
 	ImageURL    *string `json:"image_url"`
 	Status      *string `json:"status" binding:"omitempty,oneof=open claimed returned"`
 }
 
-// CreateItem: post a lost or found item
+func randomName() string {
+	b := make([]byte, 12)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// savePhoto saves the uploaded photo and returns its web path
+func savePhoto(c *gin.Context) (string, error) {
+	file, err := c.FormFile("photo")
+	if err != nil {
+		return "", nil // no photo sent, that is fine
+	}
+
+	if file.Size > 5<<20 {
+		return "", errors.New("photo must be smaller than 5 MB")
+	}
+
+	src, err := file.Open()
+	if err != nil {
+		return "", errors.New("could not read the photo")
+	}
+	defer src.Close()
+
+	// Check the real file type, not just the name
+	buf := make([]byte, 512)
+	n, _ := src.Read(buf)
+	ext, ok := imageTypes[http.DetectContentType(buf[:n])]
+	if !ok {
+		return "", errors.New("only JPG, PNG, GIF or WEBP photos are allowed")
+	}
+
+	name := randomName() + ext
+	if err := c.SaveUploadedFile(file, filepath.Join("uploads", name)); err != nil {
+		return "", errors.New("could not save the photo")
+	}
+
+	return "/uploads/" + name, nil
+}
+
+func fillPoster(items []models.Item) {
+	for i := range items {
+		items[i].PosterName = items[i].User.Name
+	}
+}
+
+// CreateItem: post a lost or found item (with optional photo)
 func CreateItem(c *gin.Context) {
 	var input itemInput
-	if err := c.ShouldBindJSON(&input); err != nil {
+	if err := c.ShouldBind(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "please fill all required fields"})
+		return
+	}
+
+	imageURL, err := savePhoto(c)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+
+	keptAt := input.KeptAt
+	if input.Type == "lost" {
+		keptAt = "" // "kept at" only makes sense for found items
 	}
 
 	item := models.Item{
@@ -41,8 +114,10 @@ func CreateItem(c *gin.Context) {
 		Description: input.Description,
 		Category:    input.Category,
 		Location:    input.Location,
+		KeptAt:      keptAt,
+		Contact:     input.Contact,
 		Type:        input.Type,
-		ImageURL:    input.ImageURL,
+		ImageURL:    imageURL,
 		Status:      "open",
 		UserID:      c.GetUint("userID"),
 	}
@@ -52,30 +127,87 @@ func CreateItem(c *gin.Context) {
 		return
 	}
 
+	database.DB.Preload("User").First(&item, item.ID)
+	item.PosterName = item.User.Name
+
 	c.JSON(http.StatusCreated, item)
 }
 
-// ListItems: show all items, newest first
-func ListItems(c *gin.Context) {
-	var items []models.Item
+// applyFilters adds the search conditions from the URL
+func applyFilters(c *gin.Context, db *gorm.DB) *gorm.DB {
+	if t := c.Query("type"); t != "" {
+		db = db.Where("type = ?", t)
+	}
+	if status := c.Query("status"); status != "" {
+		db = db.Where("status = ?", status)
+	}
+	if category := strings.TrimSpace(c.Query("category")); category != "" {
+		db = db.Where("category ILIKE ?", category)
+	}
+	if location := strings.TrimSpace(c.Query("location")); location != "" {
+		db = db.Where("location ILIKE ?", "%"+location+"%")
+	}
+	// Every word must match somewhere. Capital or small letters do not matter.
+	for _, word := range strings.Fields(c.Query("q")) {
+		like := "%" + word + "%"
+		db = db.Where(
+			"(title ILIKE ? OR description ILIKE ? OR category ILIKE ? OR location ILIKE ? OR kept_at ILIKE ?)",
+			like, like, like, like, like,
+		)
+	}
+	return db
+}
 
-	if err := database.DB.Order("created_at desc").Limit(100).Find(&items).Error; err != nil {
+// ListItems: show items with search, filters and pages
+func ListItems(c *gin.Context) {
+	page, err := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if err != nil || limit < 1 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	var total int64
+	applyFilters(c, database.DB.Model(&models.Item{})).Count(&total)
+
+	var items []models.Item
+	err = applyFilters(c, database.DB.Model(&models.Item{})).
+		Preload("User").
+		Order("created_at desc").
+		Limit(limit).
+		Offset((page - 1) * limit).
+		Find(&items).Error
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load items"})
 		return
 	}
 
-	c.JSON(http.StatusOK, items)
+	fillPoster(items)
+
+	c.JSON(http.StatusOK, gin.H{
+		"items": items,
+		"page":  page,
+		"limit": limit,
+		"total": total,
+	})
 }
 
 // GetItem: show one item
 func GetItem(c *gin.Context) {
 	var item models.Item
 
-	if err := database.DB.First(&item, c.Param("id")).Error; err != nil {
+	if err := database.DB.Preload("User").First(&item, c.Param("id")).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "item not found"})
 		return
 	}
 
+	item.PosterName = item.User.Name
 	c.JSON(http.StatusOK, item)
 }
 
@@ -110,6 +242,12 @@ func UpdateItem(c *gin.Context) {
 	}
 	if input.Location != nil {
 		updates["location"] = *input.Location
+	}
+	if input.KeptAt != nil {
+		updates["kept_at"] = *input.KeptAt
+	}
+	if input.Contact != nil {
+		updates["contact"] = *input.Contact
 	}
 	if input.ImageURL != nil {
 		updates["image_url"] = *input.ImageURL

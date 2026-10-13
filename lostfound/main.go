@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+
 	"lostfound/auth"
 	"lostfound/database"
 	"lostfound/handlers"
@@ -10,8 +12,14 @@ import (
 
 func main() {
 	database.Connect()
+	os.MkdirAll("uploads", 0755)
 
 	r := gin.Default()
+	r.MaxMultipartMemory = 8 << 20 // 8 MB
+
+	// The website and the uploaded photos
+	r.StaticFile("/", "./web/index.html")
+	r.Static("/uploads", "./uploads")
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
