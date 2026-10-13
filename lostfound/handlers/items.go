@@ -2,11 +2,13 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 
 	"lostfound/database"
 	"lostfound/models"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type itemInput struct {
@@ -57,14 +59,93 @@ func CreateItem(c *gin.Context) {
 
 // ListItems: show all items, newest first
 func ListItems(c *gin.Context) {
-	var items []models.Item
+	// applyFilters adds the search conditions from the URL
+func applyFilters(c *gin.Context, db *gorm.DB) *gorm.DB {
+	if t := c.Query("type"); t != "" {
+		db = db.Where("type = ?", t)
+	}
+	if status := c.Query("status"); status != "" {
+		db = db.Where("status = ?", status)
+	}
+	if category := c.Query("category"); category != "" {
+		db = db.Where("category ILIKE ?", category)
+	}
+	if location := c.Query("location"); location != "" {
+		db = db.Where("location ILIKE ?", "%"+location+"%")
+	}
+	if q := c.Query("q"); q != "" {
+		like := "%" + q + "%"
+		// Match the word in the title OR in the description
+		db = db.Where(
+			database.DB.Where("title ILIKE ?", like).Or("description ILIKE ?", like),
+		)
+	}
+	return db
+}
 
-	if err := database.DB.Order("created_at desc").Limit(100).Find(&items).Error; err != nil {
+// ListItems: show items with search, filters and pages
+
+// applyFilters adds the search conditions from the URL
+func applyFilters(c *gin.Context, db *gorm.DB) *gorm.DB {
+	if t := c.Query("type"); t != "" {
+		db = db.Where("type = ?", t)
+	}
+	if status := c.Query("status"); status != "" {
+		db = db.Where("status = ?", status)
+	}
+	if category := c.Query("category"); category != "" {
+		db = db.Where("category ILIKE ?", category)
+	}
+	if location := c.Query("location"); location != "" {
+		db = db.Where("location ILIKE ?", "%"+location+"%")
+	}
+	if q := c.Query("q"); q != "" {
+		like := "%" + q + "%"
+		// Match the word in the title OR in the description
+		db = db.Where(
+			database.DB.Where("title ILIKE ?", like).Or("description ILIKE ?", like),
+		)
+	}
+	return db
+}
+
+// ListItems: show items with search, filters and pages
+func ListItems(c *gin.Context) {
+	page, err := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if err != nil || limit < 1 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	// Count how many items match
+	var total int64
+	applyFilters(c, database.DB.Model(&models.Item{})).Count(&total)
+
+	// Get only the items for this page
+	var items []models.Item
+	err = applyFilters(c, database.DB.Model(&models.Item{})).
+		Order("created_at desc").
+		Limit(limit).
+		Offset((page - 1) * limit).
+		Find(&items).Error
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load items"})
 		return
 	}
 
-	c.JSON(http.StatusOK, items)
+	c.JSON(http.StatusOK, gin.H{
+		"items": items,
+		"page":  page,
+		"limit": limit,
+		"total": total,
+	})
 }
 
 // GetItem: show one item
