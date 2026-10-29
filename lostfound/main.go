@@ -28,23 +28,27 @@ func main() {
 	// Open routes: anyone can use
 	r.POST("/register", handlers.Register)
 	r.POST("/login", handlers.Login)
-	r.GET("/items", handlers.ListItems)
-	r.GET("/items/:id", handlers.GetItem)
+
+	// Anyone can browse, but we check the token to know who is viewing
+	browse := r.Group("/", auth.OptionalAuth())
+	{
+		browse.GET("/items", handlers.ListItems)
+		browse.GET("/items/:id", handlers.GetItem)
+	}
 
 	// Protected routes: token needed
-	protected := r.Group("/")
-	protected.Use(auth.RequireAuth())
+	protected := r.Group("/", auth.RequireAuth())
 	{
 		protected.GET("/me", handlers.Me)
 		protected.POST("/items", handlers.CreateItem)
 		protected.PUT("/items/:id", handlers.UpdateItem)
 		protected.DELETE("/items/:id", handlers.DeleteItem)
+
+		protected.POST("/items/:id/claims", handlers.CreateClaim)
+		protected.GET("/items/:id/claims", handlers.ItemClaims)
+		protected.GET("/claims/mine", handlers.MyClaims)
+		protected.PUT("/claims/:id", handlers.DecideClaim)
 	}
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
-	r.Run(":" + port)
+	r.Run(":8080")
 }

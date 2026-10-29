@@ -8,12 +8,16 @@ type Item struct {
 	Description string `json:"description"`
 	Category    string `gorm:"index" json:"category"`
 	Location    string `gorm:"index" json:"location"`
-	KeptAt      string `json:"kept_at"` // where the finder kept the item
-	Contact     string `json:"contact"` // phone or email the poster wants to share
-	Type        string `gorm:"not null;index" json:"type"` // "lost" or "found"
+	KeptAt      string `json:"kept_at"`
+	Contact     string `json:"contact"`
+	Type        string `gorm:"not null;index" json:"type"`
 	Status      string `gorm:"default:open" json:"status"` // open, claimed, returned
 	ImageURL    string `json:"image_url"`
 	UserID      uint   `json:"user_id"`
 	User        User   `json:"-"`
-	PosterName  string `gorm:"-" json:"poster_name"`
+
+	PosterName    string `gorm:"-" json:"poster_name"`
+	HasContact    bool   `gorm:"-" json:"has_contact"`    // poster added a contact
+	MyClaim       string `gorm:"-" json:"my_claim"`       // status of the viewer's own claim
+	PendingClaims int    `gorm:"-" json:"pending_claims"` // shown only to the poster
 }

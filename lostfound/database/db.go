@@ -25,7 +25,7 @@ func Connect() {
 	}
 
 	// Creates the tables automatically
-	err = db.AutoMigrate(&models.User{}, &models.Item{})
+	err = db.AutoMigrate(&models.User{}, &models.Item{}, &models.Claim{})	
 	if err != nil {
 		log.Fatal("Could not create tables: ", err)
 	}
