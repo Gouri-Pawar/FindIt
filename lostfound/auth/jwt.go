@@ -13,48 +13,70 @@ import (
 func secret() []byte {
 	s := os.Getenv("JWT_SECRET")
 	if s == "" {
-		s = "dev-secret-change-me" // only for development
+		s = "dev-secret-change-me"
 	}
 	return []byte(s)
 }
 
-// GenerateToken makes a token that is valid for 24 hours
 func GenerateToken(userID uint) (string, error) {
 	claims := jwt.MapClaims{
 		"user_id": userID,
 		"exp":     time.Now().Add(24 * time.Hour).Unix(),
 	}
+
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(secret())
 }
 
-// RequireAuth blocks the request if the token is missing or wrong
+func userFromToken(c *gin.Context) (uint, bool) {
+	header := c.GetHeader("Authorization")
+	parts := strings.SplitN(header, " ", 2)
+
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return 0, false
+	}
+
+	token, err := jwt.Parse(parts[1], func(token *jwt.Token) (interface{}, error) {
+		return secret(), nil
+	}, jwt.WithValidMethods([]string{"HS256"}))
+
+	if err != nil || !token.Valid {
+		return 0, false
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return 0, false
+	}
+
+	id, ok := claims["user_id"].(float64)
+	if !ok || id < 1 {
+		return 0, false
+	}
+
+	return uint(id), true
+}
+
 func RequireAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		header := c.GetHeader("Authorization")
-		if !strings.HasPrefix(header, "Bearer ") {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "login required"})
-			return
-		}
-
-		tokenString := strings.TrimPrefix(header, "Bearer ")
-		token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
-			return secret(), nil
-		}, jwt.WithValidMethods([]string{"HS256"}))
-
-		if err != nil || !token.Valid {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
-			return
-		}
-
-		claims := token.Claims.(jwt.MapClaims)
-		userID, ok := claims["user_id"].(float64)
+		userID, ok := userFromToken(c)
 		if !ok {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "invalid or missing token",
+			})
 			return
 		}
 
-		c.Set("userID", uint(userID))
+		c.Set("userID", userID)
+		c.Next()
+	}
+}
+
+func OptionalAuth() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if userID, ok := userFromToken(c); ok {
+			c.Set("userID", userID)
+		}
 		c.Next()
 	}
 }

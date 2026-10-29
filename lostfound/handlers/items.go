@@ -84,9 +84,53 @@ func savePhoto(c *gin.Context) (string, error) {
 	return "/uploads/" + name, nil
 }
 
-func fillPoster(items []models.Item) {
+// decorate adds extra info to each item for the person who is viewing
+func decorate(c *gin.Context, items []models.Item) {
+	viewer := c.GetUint("userID") // 0 when not logged in
+
+	ids := make([]uint, len(items))
 	for i := range items {
-		items[i].PosterName = items[i].User.Name
+		ids[i] = items[i].ID
+	}
+
+	myClaims := map[uint]string{}
+	pending := map[uint]int{}
+
+	if viewer != 0 && len(ids) > 0 {
+		var mine []models.Claim
+		database.DB.Where("item_id IN ? AND claimer_id = ?", ids, viewer).Find(&mine)
+		for _, cl := range mine {
+			myClaims[cl.ItemID] = cl.Status
+		}
+
+		var rows []struct {
+			ItemID uint
+			N      int
+		}
+		database.DB.Model(&models.Claim{}).
+			Select("item_id, count(*) as n").
+			Where("item_id IN ? AND status = ?", ids, "pending").
+			Group("item_id").
+			Scan(&rows)
+		for _, r := range rows {
+			pending[r.ItemID] = r.N
+		}
+	}
+
+	for i := range items {
+		it := &items[i]
+		it.PosterName = it.User.Name
+		it.HasContact = it.Contact != ""
+		it.MyClaim = myClaims[it.ID]
+
+		isOwner := viewer != 0 && it.UserID == viewer
+		if isOwner {
+			it.PendingClaims = pending[it.ID]
+		}
+		// Contact is private: only the poster and an approved claimer can see it
+		if !isOwner && it.MyClaim != "approved" {
+			it.Contact = ""
+		}
 	}
 }
 
@@ -188,7 +232,7 @@ func ListItems(c *gin.Context) {
 		return
 	}
 
-	fillPoster(items)
+	decorate(c, items)
 
 	c.JSON(http.StatusOK, gin.H{
 		"items": items,
@@ -207,8 +251,9 @@ func GetItem(c *gin.Context) {
 		return
 	}
 
-	item.PosterName = item.User.Name
-	c.JSON(http.StatusOK, item)
+	items := []models.Item{item}
+	decorate(c, items)
+	c.JSON(http.StatusOK, items[0])
 }
 
 // UpdateItem: change an item (owner only)

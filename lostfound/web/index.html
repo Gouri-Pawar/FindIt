@@ -206,6 +206,21 @@
     .s-logo{font-size:46px}
     .hello{display:none}
   }
+    /* ---------- Claims ---------- */
+  .head-btns{display:flex;gap:10px}
+  .lock{color:var(--muted);font-style:italic}
+  .muted{color:var(--muted);font-size:14px}
+  .hint{font-size:12px;color:var(--muted);margin-top:4px}
+  .claim{border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:12px;background:#f8fafc}
+  .claim-top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px}
+  .claim-msg{font-size:14px;white-space:pre-line;color:#334155}
+  .claim-contact{margin-top:8px;font-size:14px;background:#dcfce7;border-radius:10px;padding:8px 10px;color:#065f46;line-height:1.6}
+  .cstat{font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;text-transform:capitalize}
+  .cs-pending{background:#fef3c7;color:#92400e}
+  .cs-approved{background:#d1fae5;color:#065f46}
+  .cs-rejected{background:#ffe4e6;color:#9f1239}
+  .btn-wait{background:#fef3c7;color:#92400e;cursor:default}
+
 </style>
 </head>
 <body>
@@ -370,8 +385,10 @@
   <div class="appwrap">
     <div class="apphead">
       <div><h2>Browse items</h2><p>Search lost and found items posted on campus.</p></div>
-      <button class="btn btn-primary" id="appPostBtn">+ Post item</button>
-    </div>
+      <div class="head-btns">
+        <button class="btn btn-ghost" id="myClaimsBtn">My claims</button>
+        <button class="btn btn-primary" id="appPostBtn">+ Post item</button>
+      </div>    </div>
     <div class="panel">
       <div class="tabs">
         <button class="tab active" data-type="">All</button>
@@ -435,6 +452,47 @@
         <button type="submit" class="btn btn-primary" id="postSubmit">Post</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- Send a claim -->
+<div class="overlay" id="claimModal">
+  <div class="modal">
+    <h2 id="claimTitle">Claim this item</h2>
+    <p class="muted" style="margin-bottom:14px">Item: <b id="claimItemName"></b></p>
+    <form id="claimForm">
+      <div class="field">
+        <label id="claimLabel">Describe the item *</label>
+        <textarea id="cMessage" placeholder="Colour, brand, marks, what is inside..."></textarea>
+        <p class="hint">Mention a detail that is NOT visible in the photo. Only the real owner would know it.</p>
+      </div>
+      <div class="field">
+        <label>Your phone or email *</label>
+        <input id="cContact" placeholder="Shared only if your claim is approved">
+      </div>
+      <div class="row">
+        <button type="button" class="btn btn-ghost" data-close="claimModal">Cancel</button>
+        <button type="submit" class="btn btn-primary">Send claim</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Claims on my item (poster) -->
+<div class="overlay" id="itemClaimsModal">
+  <div class="modal">
+    <h2 id="icTitle">Claims</h2>
+    <div id="icList"></div>
+    <div class="row"><button type="button" class="btn btn-ghost" data-close="itemClaimsModal">Close</button></div>
+  </div>
+</div>
+
+<!-- My claims -->
+<div class="overlay" id="myClaimsModal">
+  <div class="modal">
+    <h2>My claims</h2>
+    <div id="mcList"></div>
+    <div class="row"><button type="button" class="btn btn-ghost" data-close="myClaimsModal">Close</button></div>
   </div>
 </div>
 
@@ -647,7 +705,10 @@ $('postForm').onsubmit = async e => {
 };
 
 /* ---------- Item cards ---------- */
+const itemCache = {};
+
 function card(it, i, actionsOn = true) {
+  itemCache[it.ID] = it;
   const found = it.type === 'found';
   const mine = actionsOn && state.user && state.user.id === it.user_id;
   const returned = it.status === 'returned';
@@ -656,15 +717,34 @@ function card(it, i, actionsOn = true) {
     : `<div class="ph">${found ? '🎒' : '🔎'}</div>`;
   const date = new Date(it.CreatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 
-  const actions = mine ? `<div class="actions">
+  let actions = '';
+  if (mine) {
+    actions = `<div class="actions">
+      <button class="btn btn-ghost btn-sm" data-act="claims" data-id="${it.ID}">Claims${it.pending_claims ? ' (' + it.pending_claims + ')' : ''}</button>
       ${returned ? '' : `<button class="btn btn-ok btn-sm" data-act="return" data-id="${it.ID}">Mark as returned</button>`}
       <button class="btn btn-danger btn-sm" data-act="delete" data-id="${it.ID}">Delete</button>
-    </div>` : '';
+    </div>`;
+  } else if (actionsOn && it.status === 'open') {
+    if (it.my_claim === 'pending') {
+      actions = `<div class="actions"><button class="btn btn-wait btn-sm" disabled>Claim sent ⏳</button></div>`;
+    } else if (it.my_claim === 'rejected') {
+      actions = `<div class="actions"><button class="btn btn-danger btn-sm" disabled>Claim rejected</button></div>`;
+    } else {
+      actions = `<div class="actions"><button class="btn btn-primary btn-sm" data-act="claim" data-id="${it.ID}">${found ? 'This is mine' : 'I found this'}</button></div>`;
+    }
+  } else if (actionsOn && it.my_claim === 'approved') {
+    actions = `<div class="actions"><button class="btn btn-ok btn-sm" disabled>Claim approved ✓</button></div>`;
+  }
+
+  const contactLine = it.contact
+    ? `<li><b>Contact:</b> ${esc(it.contact)}</li>`
+    : (it.has_contact ? `<li class="lock"><b>Contact:</b> 🔒 shared after claim approval</li>` : '');
 
   return `<article class="card ${returned ? 'done' : ''}" style="animation-delay:${(i % 12) * 0.06}s">
     <div class="imgbox">${img}
       <span class="badge ${found ? 'b-found' : 'b-lost'}">${found ? 'FOUND' : 'LOST'}</span>
       ${returned ? '<span class="badge b-ret">RETURNED ✓</span>' : ''}
+      ${it.status === 'claimed' ? '<span class="badge b-ret">CLAIMED</span>' : ''}
     </div>
     <div class="body">
       <h3>${esc(it.title)}</h3>
@@ -673,7 +753,7 @@ function card(it, i, actionsOn = true) {
         <li><b>Category:</b> <span class="cap">${esc(it.category)}</span></li>
         <li><b>${found ? 'Found at' : 'Last seen at'}:</b> ${esc(it.location)}</li>
         ${found && it.kept_at ? `<li><b>Kept at:</b> ${esc(it.kept_at)}</li>` : ''}
-        ${it.contact ? `<li><b>Contact:</b> ${esc(it.contact)}</li>` : ''}
+        ${contactLine}
         <li><b>Posted by:</b> ${esc(it.poster_name)} · ${date}</li>
       </ul>
       ${actions}
@@ -707,8 +787,13 @@ $('grid').addEventListener('click', async e => {
   const b = e.target.closest('button[data-act]');
   if (!b) return;
   const id = b.dataset.id;
+  const act = b.dataset.act;
+
+  if (act === 'claim') return openClaim(id);
+  if (act === 'claims') return openItemClaims(id);
+
   try {
-    if (b.dataset.act === 'return') {
+    if (act === 'return') {
       await api('/items/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'returned' }) });
       toast('Marked as returned');
     } else {
@@ -762,6 +847,104 @@ const io = new IntersectionObserver(entries => {
   entries.forEach(en => { if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); } });
 }, { threshold: 0.15 });
 document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+
+/* ---------- Claims ---------- */
+let claimItemId = null;
+let currentItemId = null;
+
+// 1. Send a claim
+function openClaim(id) {
+  if (!state.user) { toast('Please login first', true); return openAuth('login'); }
+  const it = itemCache[id];
+  claimItemId = id;
+  const found = it.type === 'found';
+  $('claimTitle').textContent = found ? 'Claim this item' : 'I found this item';
+  $('claimItemName').textContent = it.title;
+  $('claimLabel').textContent = found
+    ? 'Describe the item to prove it is yours *'
+    : 'Describe the item you have, to prove you found it *';
+  openModal('claimModal');
+}
+
+$('claimForm').onsubmit = async e => {
+  e.preventDefault();
+  const message = $('cMessage').value.trim();
+  const contact = $('cContact').value.trim();
+  if (message.length < 10) return toast('Please describe the item (at least 10 characters)', true);
+  if (!contact) return toast('Please add your phone or email', true);
+
+  try {
+    await api(`/items/${claimItemId}/claims`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, contact })
+    });
+    $('claimForm').reset();
+    closeModal('claimModal');
+    toast('Claim sent! The poster will review it.');
+    loadItems(true);
+  } catch (err) { toast(err.message, true); }
+};
+
+// 2. Poster sees the claims on their item
+async function openItemClaims(id) {
+  currentItemId = id;
+  $('icTitle').textContent = 'Claims on: ' + itemCache[id].title;
+  $('icList').innerHTML = '<p class="muted">Loading...</p>';
+  openModal('itemClaimsModal');
+  try {
+    const claims = await api(`/items/${id}/claims`);
+    $('icList').innerHTML = claims.length ? claims.map(cl => `
+      <div class="claim">
+        <div class="claim-top"><b>${esc(cl.claimer_name)}</b><span class="cstat cs-${cl.status}">${cl.status}</span></div>
+        <p class="claim-msg">${esc(cl.message)}</p>
+        ${cl.status === 'approved' ? `<p class="claim-contact">📞 ${esc(cl.contact)}</p>` : ''}
+        ${cl.status === 'pending' ? `<div class="actions">
+          <button class="btn btn-ok btn-sm" data-decide="approve" data-id="${cl.ID}">Approve</button>
+          <button class="btn btn-danger btn-sm" data-decide="reject" data-id="${cl.ID}">Reject</button>
+        </div>` : ''}
+      </div>`).join('') : '<p class="muted">No claims yet.</p>';
+  } catch (err) { toast(err.message, true); }
+}
+
+// 3. Poster approves or rejects
+$('icList').addEventListener('click', async e => {
+  const b = e.target.closest('button[data-decide]');
+  if (!b) return;
+  const decision = b.dataset.decide;
+  if (decision === 'approve' && !confirm('Approve this claim? Your contact details will be shared with this person.')) return;
+
+  try {
+    await api('/claims/' + b.dataset.id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision })
+    });
+    toast(decision === 'approve' ? 'Claim approved. Contact details shared.' : 'Claim rejected');
+    await loadItems(true);
+    openItemClaims(currentItemId);
+  } catch (err) { toast(err.message, true); }
+});
+
+// 4. The claims I have sent
+async function openMyClaims() {
+  if (!state.user) { toast('Please login first', true); return openAuth('login'); }
+  $('mcList').innerHTML = '<p class="muted">Loading...</p>';
+  openModal('myClaimsModal');
+  try {
+    const rows = await api('/claims/mine');
+    $('mcList').innerHTML = rows.length ? rows.map(r => `
+      <div class="claim">
+        <div class="claim-top"><b>${esc(r.item_title)}</b><span class="cstat cs-${r.status}">${r.status}</span></div>
+        <p class="claim-msg">${esc(r.message)}</p>
+        ${r.status === 'approved' ? `<p class="claim-contact">✅ Approved by ${esc(r.poster_name)}
+          ${r.poster_contact ? `<br>📞 ${esc(r.poster_contact)}` : ''}
+          ${r.kept_at ? `<br>📍 Kept at: ${esc(r.kept_at)}` : ''}</p>` : ''}
+        ${r.status === 'rejected' ? '<p class="muted">The poster rejected this claim.</p>' : ''}
+      </div>`).join('') : '<p class="muted">You have not sent any claims yet.</p>';
+  } catch (err) { toast(err.message, true); }
+}
+$('myClaimsBtn').onclick = openMyClaims;
 
 /* ---------- Start ---------- */
 const opts = CATEGORIES.map(c => `<option value="${c}">${c.charAt(0).toUpperCase() + c.slice(1)}</option>`).join('');
