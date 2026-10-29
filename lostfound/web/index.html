@@ -5,6 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FindIt - Campus Lost & Found</title>
 <style>
+
+
+.site-footer {
+  text-align: center;
+  padding: 20px 10px;
+  margin-top: 30px;
+  color: #888;
+  font-size: 14px;
+  border-top: 1px solid #ddd;
+}
+
+.site-footer p {
+  margin: 5px 0;
+}
+
   :root{--primary:#2563eb;--dark:#1d4ed8;--bg:#f5f8ff;--text:#0f172a;--muted:#64748b;--found:#059669;--lost:#e11d48;--border:#e2e8f0}
   *{box-sizing:border-box;margin:0;padding:0}
   html{scroll-behavior:smooth}
@@ -377,7 +392,10 @@
     </div>
   </section>
 
-  <footer>FindIt · Campus Lost &amp; Found Portal</footer>
+  <footer class="site-footer">
+  <p>Made with ❤️ by Gouri Pawar</p>
+  <p>FindIt — Campus Lost & Found Portal</p>
+</footer>
 </div>
 
 <!-- ================= APP PAGE ================= -->
@@ -534,18 +552,42 @@ async function api(path, opts = {}) {
 /* ---------- Pages (landing / app) ---------- */
 function showView(v) {
   state.view = v;
+
+  localStorage.setItem('finditView', v);
+
   $('landing').hidden = v !== 'landing';
   $('appView').hidden = v !== 'app';
+
   window.scrollTo(0, 0);
   renderNav();
-  if (v === 'app') loadItems(true); else loadLanding();
+
+  if (v === 'app') {
+    loadItems(true);
+  } else {
+    loadLanding();
+  }
 }
 
 /* ---------- Splash ---------- */
-$('startBtn').onclick = () => {
+
+function hideSplash() {
   $('splash').classList.add('hide');
-  setTimeout(() => $('splash').style.display = 'none', 600);
-};
+
+  setTimeout(() => {
+    $('splash').style.display = 'none';
+  }, 600);
+}
+
+$('startBtn').onclick = hideSplash;
+
+// Show splash when a new browser tab/session starts
+if (sessionStorage.getItem('finditSplashSeen') === 'true') {
+  $('splash').style.display = 'none';
+} else {
+  $('splash').style.display = 'flex';
+  sessionStorage.setItem('finditSplashSeen', 'true');
+}
+
 
 /* ---------- Navbar ---------- */
 function renderNav() {
@@ -707,17 +749,35 @@ $('postForm').onsubmit = async e => {
 /* ---------- Item cards ---------- */
 const itemCache = {};
 
+
 function card(it, i, actionsOn = true) {
   itemCache[it.ID] = it;
+
   const found = it.type === 'found';
   const mine = actionsOn && state.user && state.user.id === it.user_id;
   const returned = it.status === 'returned';
-  const img = it.image_url
-    ? `<img src="${esc(it.image_url)}" alt="${esc(it.title)}">`
+
+  // Fix image paths
+  const imagePath = it.image_url
+    ? (/^https?:\/\//i.test(it.image_url)
+        ? it.image_url
+        : '/' + it.image_url.replace(/^\/+/, ''))
+    : '';
+
+  const img = imagePath
+    ? `<img src="${esc(imagePath)}"
+            alt="${esc(it.title)}"
+            onerror="this.onerror=null;this.parentElement.innerHTML='${found ? '🎒' : '🔎'}';">`
     : `<div class="ph">${found ? '🎒' : '🔎'}</div>`;
-  const date = new Date(it.CreatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+
+  const date = new Date(it.CreatedAt).toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  });
 
   let actions = '';
+
   if (mine) {
     actions = `<div class="actions">
       <button class="btn btn-ghost btn-sm" data-act="claims" data-id="${it.ID}">Claims${it.pending_claims ? ' (' + it.pending_claims + ')' : ''}</button>
@@ -738,14 +798,18 @@ function card(it, i, actionsOn = true) {
 
   const contactLine = it.contact
     ? `<li><b>Contact:</b> ${esc(it.contact)}</li>`
-    : (it.has_contact ? `<li class="lock"><b>Contact:</b> 🔒 shared after claim approval</li>` : '');
+    : (it.has_contact
+        ? `<li class="lock"><b>Contact:</b> 🔒 shared after claim approval</li>`
+        : '');
 
   return `<article class="card ${returned ? 'done' : ''}" style="animation-delay:${(i % 12) * 0.06}s">
-    <div class="imgbox">${img}
+    <div class="imgbox">
+      ${img}
       <span class="badge ${found ? 'b-found' : 'b-lost'}">${found ? 'FOUND' : 'LOST'}</span>
       ${returned ? '<span class="badge b-ret">RETURNED ✓</span>' : ''}
       ${it.status === 'claimed' ? '<span class="badge b-ret">CLAIMED</span>' : ''}
     </div>
+
     <div class="body">
       <h3>${esc(it.title)}</h3>
       <p class="desc">${esc(it.description)}</p>
@@ -950,7 +1014,14 @@ $('myClaimsBtn').onclick = openMyClaims;
 const opts = CATEGORIES.map(c => `<option value="${c}">${c.charAt(0).toUpperCase() + c.slice(1)}</option>`).join('');
 $('fCategory').innerHTML = '<option value="">All categories</option>' + opts;
 $('pCategory').innerHTML = opts;
-showView(state.user ? 'app' : 'landing');
+const savedView = localStorage.getItem('finditView');
+
+showView(
+  savedView === 'app' || savedView === 'landing'
+    ? savedView
+    : (state.user ? 'app' : 'landing')
+);
 </script>
+
 </body>
 </html>
