@@ -1,19 +1,18 @@
 package handlers
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
-	"path/filepath"
 	"strconv"
+	"strings"
 
 	"lostfound/database"
 	"lostfound/models"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
-	"strings"
 )
 
 // Only these photo types are allowed
@@ -45,43 +44,35 @@ type updateInput struct {
 	Status      *string `json:"status" binding:"omitempty,oneof=open claimed returned"`
 }
 
-func randomName() string {
-	b := make([]byte, 12)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
-}
-
-// savePhoto saves the uploaded photo and returns its web path
-func savePhoto(c *gin.Context) (string, error) {
+// readPhoto reads the uploaded photo and checks that it is a real image
+func readPhoto(c *gin.Context) ([]byte, string, error) {
 	file, err := c.FormFile("photo")
 	if err != nil {
-		return "", nil // no photo sent, that is fine
+		return nil, "", nil // no photo sent, that is fine
 	}
 
 	if file.Size > 5<<20 {
-		return "", errors.New("photo must be smaller than 5 MB")
+		return nil, "", errors.New("photo must be smaller than 5 MB")
 	}
 
 	src, err := file.Open()
 	if err != nil {
-		return "", errors.New("could not read the photo")
+		return nil, "", errors.New("could not read the photo")
 	}
 	defer src.Close()
 
-	// Check the real file type, not just the name
-	buf := make([]byte, 512)
-	n, _ := src.Read(buf)
-	ext, ok := imageTypes[http.DetectContentType(buf[:n])]
-	if !ok {
-		return "", errors.New("only JPG, PNG, GIF or WEBP photos are allowed")
+	data, err := io.ReadAll(io.LimitReader(src, 5<<20))
+	if err != nil {
+		return nil, "", errors.New("could not read the photo")
 	}
 
-	name := randomName() + ext
-	if err := c.SaveUploadedFile(file, filepath.Join("uploads", name)); err != nil {
-		return "", errors.New("could not save the photo")
+	// Check the real file type, not just the file name
+	ctype := http.DetectContentType(data)
+	if _, ok := imageTypes[ctype]; !ok {
+		return nil, "", errors.New("only JPG, PNG, GIF or WEBP photos are allowed")
 	}
 
-	return "/uploads/" + name, nil
+	return data, ctype, nil
 }
 
 // decorate adds extra info to each item for the person who is viewing
@@ -142,7 +133,7 @@ func CreateItem(c *gin.Context) {
 		return
 	}
 
-	imageURL, err := savePhoto(c)
+	data, ctype, err := readPhoto(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -161,7 +152,8 @@ func CreateItem(c *gin.Context) {
 		KeptAt:      keptAt,
 		Contact:     input.Contact,
 		Type:        input.Type,
-		ImageURL:    imageURL,
+		ImageData:   data, // the photo is saved inside PostgreSQL
+		ImageType:   ctype,
 		Status:      "open",
 		UserID:      c.GetUint("userID"),
 	}
@@ -171,10 +163,30 @@ func CreateItem(c *gin.Context) {
 		return
 	}
 
-	database.DB.Preload("User").First(&item, item.ID)
+	// The photo is served from our own API route
+	if len(data) > 0 {
+		url := fmt.Sprintf("/items/%d/image", item.ID)
+		database.DB.Model(&item).Update("image_url", url)
+	}
+
+	item.ImageData = nil // no need to keep the bytes in memory
+	database.DB.Omit("image_data").Preload("User").First(&item, item.ID)
 	item.PosterName = item.User.Name
 
 	c.JSON(http.StatusCreated, item)
+}
+
+// ItemImage sends the photo of one item
+func ItemImage(c *gin.Context) {
+	var item models.Item
+	err := database.DB.Select("id", "image_data", "image_type").First(&item, c.Param("id")).Error
+	if err != nil || len(item.ImageData) == 0 {
+		c.Status(http.StatusNotFound)
+		return
+	}
+
+	c.Header("Cache-Control", "public, max-age=86400")
+	c.Data(http.StatusOK, item.ImageType, item.ImageData)
 }
 
 // applyFilters adds the search conditions from the URL
@@ -222,6 +234,7 @@ func ListItems(c *gin.Context) {
 
 	var items []models.Item
 	err = applyFilters(c, database.DB.Model(&models.Item{})).
+		Omit("image_data"). // do not load the heavy photo bytes for the list
 		Preload("User").
 		Order("created_at desc").
 		Limit(limit).
@@ -246,7 +259,7 @@ func ListItems(c *gin.Context) {
 func GetItem(c *gin.Context) {
 	var item models.Item
 
-	if err := database.DB.Preload("User").First(&item, c.Param("id")).Error; err != nil {
+	if err := database.DB.Omit("image_data").Preload("User").First(&item, c.Param("id")).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "item not found"})
 		return
 	}
@@ -259,7 +272,7 @@ func GetItem(c *gin.Context) {
 // UpdateItem: change an item (owner only)
 func UpdateItem(c *gin.Context) {
 	var item models.Item
-	if err := database.DB.First(&item, c.Param("id")).Error; err != nil {
+	if err := database.DB.Omit("image_data").First(&item, c.Param("id")).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "item not found"})
 		return
 	}
@@ -317,7 +330,7 @@ func UpdateItem(c *gin.Context) {
 // DeleteItem: remove an item (owner only)
 func DeleteItem(c *gin.Context) {
 	var item models.Item
-	if err := database.DB.First(&item, c.Param("id")).Error; err != nil {
+	if err := database.DB.Select("id", "user_id").First(&item, c.Param("id")).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "item not found"})
 		return
 	}

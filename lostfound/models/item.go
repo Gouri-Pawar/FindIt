@@ -13,11 +13,13 @@ type Item struct {
 	Type        string `gorm:"not null;index" json:"type"`
 	Status      string `gorm:"default:open" json:"status"` // open, claimed, returned
 	ImageURL    string `json:"image_url"`
+	ImageData   []byte `gorm:"type:bytea" json:"-"` // the photo itself, stored in the database
+	ImageType   string `json:"-"`                   // for example image/jpeg
 	UserID      uint   `json:"user_id"`
 	User        User   `json:"-"`
 
 	PosterName    string `gorm:"-" json:"poster_name"`
-	HasContact    bool   `gorm:"-" json:"has_contact"`    // poster added a contact
-	MyClaim       string `gorm:"-" json:"my_claim"`       // status of the viewer's own claim
-	PendingClaims int    `gorm:"-" json:"pending_claims"` // shown only to the poster
+	HasContact    bool   `gorm:"-" json:"has_contact"`
+	MyClaim       string `gorm:"-" json:"my_claim"`
+	PendingClaims int    `gorm:"-" json:"pending_claims"`
 }
