@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FindIt - Campus Lost & Found</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#2563eb">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="FindIt">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
 <style>
 
 
@@ -236,6 +241,7 @@
   .cs-rejected{background:#ffe4e6;color:#9f1239}
   .btn-wait{background:#fef3c7;color:#92400e;cursor:default}
 
+  #installBtn{position:fixed;right:18px;bottom:18px;z-index:120;box-shadow:0 10px 24px rgba(37,99,235,.35)}
 </style>
 </head>
 <body>
@@ -513,7 +519,7 @@
     <div class="row"><button type="button" class="btn btn-ghost" data-close="myClaimsModal">Close</button></div>
   </div>
 </div>
-
+<button class="btn btn-primary" id="installBtn" hidden>📲 Install app</button>
 <div id="toast"></div>
 
 <script>
@@ -1021,6 +1027,36 @@ showView(
     ? savedView
     : (state.user ? 'app' : 'landing')
 );
+
+/* ---------- PWA: install as an app ---------- */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+
+let installEvent = null;
+
+// The browser says the app can be installed, so show our button
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  installEvent = e;
+  $('installBtn').hidden = false;
+});
+
+$('installBtn').onclick = async () => {
+  if (!installEvent) return;
+  installEvent.prompt();
+  await installEvent.userChoice;
+  installEvent = null;
+  $('installBtn').hidden = true;
+};
+
+window.addEventListener('appinstalled', () => {
+  $('installBtn').hidden = true;
+  toast('FindIt installed!');
+});
+
 </script>
 
 </body>

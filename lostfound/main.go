@@ -20,6 +20,9 @@ func main() {
 	// The website and the uploaded photos
 	r.StaticFile("/", "./web/index.html")
 	r.Static("/uploads", "./uploads")
+	r.StaticFile("/manifest.json", "./web/manifest.json")
+	r.StaticFile("/sw.js", "./web/sw.js")   // must be served from "/" so it covers the whole site
+	r.Static("/icons", "./web/icons")
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
