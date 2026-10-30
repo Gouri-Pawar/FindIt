@@ -34,6 +34,7 @@ func main() {
 	{
 		browse.GET("/items", handlers.ListItems)
 		browse.GET("/items/:id", handlers.GetItem)
+		browse.GET("/items/:id/image", handlers.ItemImage)
 	}
 
 	// Protected routes: token needed
