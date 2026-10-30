@@ -174,6 +174,7 @@ func CreateItem(c *gin.Context) {
 	item.PosterName = item.User.Name
 
 	c.JSON(http.StatusCreated, item)
+	Broadcast("items")
 }
 
 // ItemImage sends the photo of one item
@@ -325,6 +326,7 @@ func UpdateItem(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, item)
+	Broadcast("items")
 }
 
 // DeleteItem: remove an item (owner only)
@@ -346,4 +348,5 @@ func DeleteItem(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "item deleted"})
+	Broadcast("items")
 }

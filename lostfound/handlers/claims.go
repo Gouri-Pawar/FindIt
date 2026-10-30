@@ -61,6 +61,7 @@ func CreateClaim(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"message": "claim sent"})
+	Broadcast("claims")
 }
 
 // ItemClaims: the poster sees the claims on their item
@@ -178,4 +179,6 @@ func DecideClaim(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "claim " + input.Decision + "d"})
+	Broadcast("claims")
+	Broadcast("items")
 }
