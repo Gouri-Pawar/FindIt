@@ -8,8 +8,7 @@
 
 FindIt is a web portal where students report lost items, post found items, and get belongings back to their real owners.
 
-**Live demo:** [https://<img width="1470" height="831" alt="Screenshot 2026-10-31 at 8 08 57 AM" src="https://github.com/user-attachments/assets/80e230e8-226b-42fd-962f-fe6d9ded941b" />
-findit-api-ysoa.onrender.com/]
+**Live demo:** [https://findit-api-ysoa.onrender.com/]
 *(The free server may take about 30 seconds to wake up on the first visit.)*
 
 <p align="center">
